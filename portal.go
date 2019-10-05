@@ -191,15 +191,15 @@ func (portal *Portal) handleMessage(msg PortalMessage) {
 	case whatsapp.TextMessage:
 		portal.HandleTextMessage(msg.source, data)
 	case whatsapp.ImageMessage:
-		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, data.Caption, false)
+		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, data.Caption, false, mautrix.MsgImage)
 	case whatsapp.StickerMessage:
-		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, "", true)
+		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, "", true, "")
 	case whatsapp.VideoMessage:
-		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, data.Caption, false)
+		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, data.Caption, false, mautrix.MsgVideo)
 	case whatsapp.AudioMessage:
-		portal.HandleMediaMessage(msg.source, data.Download, nil, data.Info, data.Type, "", false)
+		portal.HandleMediaMessage(msg.source, data.Download, nil, data.Info, data.Type, "", false, mautrix.MsgAudio)
 	case whatsapp.DocumentMessage:
-		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, data.Title, false)
+		portal.HandleMediaMessage(msg.source, data.Download, data.Thumbnail, data.Info, data.Type, data.Title, false, mautrix.MsgFile)
 	case whatsappExt.MessageRevocation:
 		portal.HandleMessageRevoke(msg.source, data)
 	case FakeMessage:
@@ -902,7 +902,7 @@ func (portal *Portal) HandleTextMessage(source *User, message whatsapp.TextMessa
 	portal.finishHandling(source, message.Info.Source, resp.EventID)
 }
 
-func (portal *Portal) HandleMediaMessage(source *User, download func() ([]byte, error), thumbnail []byte, info whatsapp.MessageInfo, mimeType, caption string, sendAsSticker bool) {
+func (portal *Portal) HandleMediaMessage(source *User, download func() ([]byte, error), thumbnail []byte, info whatsapp.MessageInfo, mimeType, caption string, sendAsSticker bool, msgType mautrix.MessageType) {
 	if !portal.startHandling(info) {
 		return
 	}
@@ -984,28 +984,24 @@ func (portal *Portal) HandleMediaMessage(source *User, download func() ([]byte, 
 		}
 	}
 
-	switch strings.ToLower(strings.Split(mimeType, "/")[0]) {
-	case "image":
+	if strings.ToLower(strings.Split(mimeType, "/")[0]) == "image" {
 		if (!sendAsSticker) {
 			content.MsgType = mautrix.MsgImage
 		}
 		cfg, _, _ := image.DecodeConfig(bytes.NewReader(data))
 		content.Info.Width = cfg.Width
 		content.Info.Height = cfg.Height
-	case "video":
-		content.MsgType = mautrix.MsgVideo
-	case "audio":
-		content.MsgType = mautrix.MsgAudio
-	default:
-		content.MsgType = mautrix.MsgFile
+	}
+
+	eventType := mautrix.EventMessage
+	if sendAsSticker {
+		eventType = mautrix.EventSticker
+	} else {
+		content.MsgType = msgType
 	}
 
 	_, _ = intent.UserTyping(portal.MXID, false, 0)
 	ts := int64(info.Timestamp * 1000)
-	eventType := mautrix.EventMessage
-	if sendAsSticker {
-		eventType = mautrix.EventSticker
-	}
 	resp, err := intent.SendMassagedMessageEvent(portal.MXID, eventType, &MessageContent{content, intent.IsCustomPuppet}, ts)
 	if err != nil {
 		portal.log.Errorfln("Failed to handle message %s: %v", info.Id, err)
